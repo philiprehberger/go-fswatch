@@ -91,6 +91,13 @@ func main() {
 | `Event` | File system change event |
 | `Op` | Operation type (Create, Modify, Delete) |
 
+## Development
+
+```bash
+go test ./...
+go vet ./...
+```
+
 ## License
 
 MIT

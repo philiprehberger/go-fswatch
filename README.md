@@ -8,7 +8,7 @@ Polling-based file system watcher for Go. Zero dependencies.
 
 ## Installation
 
-```sh
+```bash
 go get github.com/philiprehberger/go-fswatch
 ```
 

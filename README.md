@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-fswatch.svg)](https://pkg.go.dev/github.com/philiprehberger/go-fswatch)
 [![License](https://img.shields.io/github/license/philiprehberger/go-fswatch)](LICENSE)
 
-Polling-based file system watcher for Go. Zero dependencies.
+Polling-based file system watcher for Go. Zero dependencies
 
 ## Installation
 

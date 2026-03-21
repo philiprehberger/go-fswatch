@@ -1,8 +1,6 @@
 # go-fswatch
 
-[![CI](https://github.com/philiprehberger/go-fswatch/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/go-fswatch/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-fswatch.svg)](https://pkg.go.dev/github.com/philiprehberger/go-fswatch)
-[![License](https://img.shields.io/github/license/philiprehberger/go-fswatch)](LICENSE)
+[![CI](https://github.com/philiprehberger/go-fswatch/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/go-fswatch/actions/workflows/ci.yml) [![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-fswatch.svg)](https://pkg.go.dev/github.com/philiprehberger/go-fswatch) [![License](https://img.shields.io/github/license/philiprehberger/go-fswatch)](LICENSE)
 
 Polling-based file system watcher for Go. Zero dependencies
 

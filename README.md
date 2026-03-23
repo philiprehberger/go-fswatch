@@ -53,6 +53,52 @@ func main() {
 }
 ```
 
+### Per-Event Callbacks
+
+Register callbacks for specific event types. These fire in addition to `OnChange`:
+
+```go
+w.OnCreate(func(e fswatch.Event) {
+	fmt.Println("created:", e.Path)
+})
+
+w.OnModify(func(e fswatch.Event) {
+	fmt.Println("modified:", e.Path)
+})
+
+w.OnDelete(func(e fswatch.Event) {
+	fmt.Println("deleted:", e.Path)
+})
+```
+
+### Single File Watching
+
+Use `WatchFile` to watch a single file without setting up paths and globs manually:
+
+```go
+w, err := fswatch.WatchFile("config.yaml", func(e fswatch.Event) {
+	fmt.Printf("config changed: %s\n", e.Op)
+})
+if err != nil {
+	panic(err)
+}
+
+ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+defer stop()
+_ = w.Start(ctx)
+```
+
+### Snapshot
+
+Retrieve the current map of tracked files and their last modification times:
+
+```go
+snap := w.Snapshot()
+for path, modTime := range snap {
+	fmt.Printf("%s last modified at %s\n", path, modTime)
+}
+```
+
 ### Configuration
 
 | Option | Description | Default |
@@ -63,6 +109,7 @@ func main() {
 | `Debounce(d)` | Debounce interval | 500ms |
 | `PollInterval(d)` | Poll frequency | 1s |
 | `Recursive(bool)` | Watch subdirs | true |
+| `MaxDepth(n)` | Limit recursion depth (0 = top dir only) | unlimited |
 
 ### Events
 
@@ -77,15 +124,21 @@ func main() {
 | Function / Type | Description |
 |-----------------|-------------|
 | `New(opts ...Option) (*Watcher, error)` | Create a new watcher |
-| `(*Watcher).OnChange(fn func([]Event))` | Register change callback |
+| `WatchFile(path string, fn func(Event), opts ...Option) (*Watcher, error)` | Watch a single file |
+| `(*Watcher).OnChange(fn func([]Event))` | Register batch change callback |
+| `(*Watcher).OnCreate(fn func(Event))` | Register create-only callback |
+| `(*Watcher).OnModify(fn func(Event))` | Register modify-only callback |
+| `(*Watcher).OnDelete(fn func(Event))` | Register delete-only callback |
 | `(*Watcher).Start(ctx context.Context) error` | Start watching (blocks) |
 | `(*Watcher).Close() error` | Stop watching |
+| `(*Watcher).Snapshot() map[string]time.Time` | Get tracked files and mod times |
 | `Paths(paths ...string) Option` | Set directories to watch |
 | `Glob(patterns ...string) Option` | Set include patterns |
 | `Ignore(patterns ...string) Option` | Set exclude patterns |
 | `Debounce(d time.Duration) Option` | Set debounce interval |
 | `PollInterval(d time.Duration) Option` | Set poll frequency |
 | `Recursive(enabled bool) Option` | Enable/disable recursive watching |
+| `MaxDepth(n int) Option` | Limit recursion depth |
 | `Event` | File system change event |
 | `Op` | Operation type (Create, Modify, Delete) |
 

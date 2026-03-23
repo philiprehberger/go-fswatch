@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Add per-event callbacks: `OnCreate`, `OnModify`, `OnDelete` for type-specific event handling
+- Add `WatchFile` convenience function for watching a single file
+- Add `MaxDepth` option to limit directory recursion depth
+- Add `Snapshot` method to retrieve tracked files and their modification times
+
 ## 0.1.3
 
 - Consolidate README badges onto single line, fix CHANGELOG format

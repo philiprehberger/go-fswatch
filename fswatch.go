@@ -25,6 +25,8 @@ type config struct {
 	debounce     time.Duration
 	pollInterval time.Duration
 	recursive    bool
+	maxDepth     int
+	hasMaxDepth  bool
 }
 
 func defaultConfig() config {
@@ -82,11 +84,27 @@ func Recursive(enabled bool) Option {
 	}
 }
 
+// MaxDepth limits the recursion depth when watching directories. A depth of 0
+// means only the specified directory (no subdirectories), 1 means one level
+// of subdirectories, and so on. MaxDepth implicitly enables recursive watching.
+// By default there is no depth limit.
+func MaxDepth(n int) Option {
+	return func(c *config) {
+		c.maxDepth = n
+		c.hasMaxDepth = true
+		c.recursive = true
+	}
+}
+
 // Watcher watches directories for file system changes using polling.
 type Watcher struct {
 	cfg      config
 	onChange func(events []Event)
+	onCreate func(Event)
+	onModify func(Event)
+	onDelete func(Event)
 	mu       sync.Mutex
+	snapshot map[string]time.Time
 	cancel   context.CancelFunc
 	done     chan struct{}
 }
@@ -107,6 +125,38 @@ func New(opts ...Option) (*Watcher, error) {
 	}, nil
 }
 
+// WatchFile is a convenience function that creates a watcher for a single file.
+// It watches the file's parent directory with a glob matching only the target
+// filename, and registers fn as the OnChange callback.
+func WatchFile(path string, fn func(Event), opts ...Option) (*Watcher, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(absPath)
+	name := filepath.Base(absPath)
+
+	defaults := []Option{
+		Paths(dir),
+		Glob(name),
+		Recursive(false),
+	}
+	allOpts := append(defaults, opts...)
+
+	w, err := New(allOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	w.OnChange(func(events []Event) {
+		for _, e := range events {
+			fn(e)
+		}
+	})
+
+	return w, nil
+}
+
 // OnChange registers a callback that is called with a batch of events
 // whenever file system changes are detected. Only one callback can be
 // registered; subsequent calls overwrite the previous callback.
@@ -114,6 +164,46 @@ func (w *Watcher) OnChange(fn func(events []Event)) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.onChange = fn
+}
+
+// OnCreate registers a callback that fires for each Create event individually,
+// in addition to the OnChange batch callback. Subsequent calls overwrite the
+// previous callback.
+func (w *Watcher) OnCreate(fn func(Event)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.onCreate = fn
+}
+
+// OnModify registers a callback that fires for each Modify event individually,
+// in addition to the OnChange batch callback. Subsequent calls overwrite the
+// previous callback.
+func (w *Watcher) OnModify(fn func(Event)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.onModify = fn
+}
+
+// OnDelete registers a callback that fires for each Delete event individually,
+// in addition to the OnChange batch callback. Subsequent calls overwrite the
+// previous callback.
+func (w *Watcher) OnDelete(fn func(Event)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.onDelete = fn
+}
+
+// Snapshot returns a copy of the current map of tracked file paths to their
+// last modification times. If the watcher has not been started yet, the
+// returned map will be empty.
+func (w *Watcher) Snapshot() map[string]time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	result := make(map[string]time.Time, len(w.snapshot))
+	for k, v := range w.snapshot {
+		result[k] = v
+	}
+	return result
 }
 
 // Start begins watching for file system changes. It blocks until the
@@ -130,6 +220,10 @@ func (w *Watcher) Start(ctx context.Context) error {
 	}()
 
 	snapshot := w.scan()
+	w.mu.Lock()
+	w.snapshot = snapshot
+	w.mu.Unlock()
+
 	ticker := time.NewTicker(w.cfg.pollInterval)
 	defer ticker.Stop()
 
@@ -150,6 +244,9 @@ func (w *Watcher) Start(ctx context.Context) error {
 			current := w.scan()
 			events := diff(snapshot, current)
 			snapshot = current
+			w.mu.Lock()
+			w.snapshot = snapshot
+			w.mu.Unlock()
 
 			if len(events) > 0 {
 				pending = append(pending, events...)
@@ -184,15 +281,55 @@ func (w *Watcher) Close() error {
 	return nil
 }
 
-// deliver calls the registered onChange callback with the given events.
+// deliver calls the registered onChange callback with the given events,
+// and fires any per-event callbacks (OnCreate, OnModify, OnDelete).
 func (w *Watcher) deliver(events []Event) {
 	w.mu.Lock()
 	fn := w.onChange
+	createFn := w.onCreate
+	modifyFn := w.onModify
+	deleteFn := w.onDelete
 	w.mu.Unlock()
 
 	if fn != nil {
 		fn(events)
 	}
+
+	for _, e := range events {
+		switch e.Op {
+		case Create:
+			if createFn != nil {
+				createFn(e)
+			}
+		case Modify:
+			if modifyFn != nil {
+				modifyFn(e)
+			}
+		case Delete:
+			if deleteFn != nil {
+				deleteFn(e)
+			}
+		}
+	}
+}
+
+// depth returns how many directory levels path is below root.
+// If path == root, depth is 0. If path is a direct child of root, depth is 1, etc.
+func depth(root, path string) int {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return 0
+	}
+	if rel == "." {
+		return 0
+	}
+	n := 1
+	for _, c := range filepath.ToSlash(rel) {
+		if c == '/' {
+			n++
+		}
+	}
+	return n
 }
 
 // scan walks all configured paths and returns a snapshot of file modification times.
@@ -208,7 +345,19 @@ func (w *Watcher) scan() map[string]time.Time {
 					if w.isIgnored(d.Name()) && path != root {
 						return filepath.SkipDir
 					}
+					// Check max depth for directories.
+					if w.cfg.hasMaxDepth && path != root {
+						if depth(root, path) > w.cfg.maxDepth {
+							return filepath.SkipDir
+						}
+					}
 					return nil
+				}
+				// Check max depth for files.
+				if w.cfg.hasMaxDepth {
+					if depth(root, filepath.Dir(path)) > w.cfg.maxDepth {
+						return nil
+					}
 				}
 				if w.matchFile(d.Name()) {
 					info, err := d.Info()
